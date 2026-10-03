@@ -1,0 +1,80 @@
+# Production-style stack: Caddy (HTTPS) -> app -> Postgres. Only Caddy publishes ports.
+# For local use without Caddy, add docker-compose.override.example.yml (see README).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paramistech
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d paramistech"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["node", "scripts/migrate.mjs"]
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/paramistech
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  uploads-init:
+    image: alpine:3.20
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /data/uploads && chown -R 1001:1001 /data/uploads"]
+    volumes:
+      - uploads:/data/uploads
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL in .env}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/paramistech
+      UPLOADS_DIR: /data/uploads
+      # Safe only in this stack: Caddy is the sole entry point and overwrites X-Forwarded-For.
+      TRUST_PROXY: "true"
+    expose:
+      - "3000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      uploads-init:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?Set SITE_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:
+  uploads:
+  caddy_data:
+  caddy_config:
