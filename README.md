@@ -23,6 +23,7 @@ After changing `src/db/schema.ts`: `npm run db:generate`, review and commit the 
 | `POSTGRES_PASSWORD` | compose | Password of the bundled Postgres. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | seed | Used only by `seed-admin.mjs` (re-running resets that admin's password and signs it out everywhere). |
 | `RATE_LIMIT_SALT` | production | 16+ chars; salts the hashed IP / email used for rate limits. The app refuses to hash without it in production. |
+| `SESSION_COOKIE_SAMESITE` | no | `strict` (default), `lax` or `none` for the admin session cookie. Use `none` when the panel is embedded in a cross-site frame (an iframe preview): browsers refuse to store Strict/Lax cookies from a cross-site context, so the login silently bounces back to the form. `none` forces `Secure` and needs a browser that allows third-party cookies. |
 | `TRUST_PROXY` | no | `true` only when a trusted proxy overwrites `X-Forwarded-For` (the Caddy stack sets it). With `false`, all visitors share one rate-limit bucket, so use it for local runs only. |
 | `SITE_DOMAIN`, `ACME_EMAIL` | compose | Domain and Let's Encrypt contact for Caddy. |
 | `ALLOW_PLACEHOLDERS` | no | `true` shows sample rows (`is_placeholder`) in production. Leave unset for a real launch. |
@@ -70,6 +71,9 @@ The override publishes port 3000, sets `TRUST_PROXY=false` and keeps Caddy off (
 | Change own password, sign out everywhere | yes | yes |
 
 Every server action, route handler and page re-checks the session and role on the server; hidden links are only cosmetic.
+When a login completes but the browser did not keep the cookie (third-party cookies blocked, or an iframe
+that refused it), `/admin` explains that instead of showing a bare form again.
+
 The login form and the logout button are plain HTML forms that post to `/api/admin/login` and `/api/admin/logout`
 (303 back to `/admin`, errors come back as `?error=invalid|limited`), so signing in and out also works with
 JavaScript disabled or blocked; the JSON responses those routes return stay in place for the enhanced path, which

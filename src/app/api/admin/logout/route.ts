@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeAudit } from '@/lib/audit';
-import { COOKIE_NAME, getSessionUser, revokeSessionByToken } from '@/lib/auth';
+import { COOKIE_NAME, getSessionUser, revokeSessionByToken, sessionCookieOptions } from '@/lib/auth';
 import { isAllowedRequestOrigin } from '@/lib/origin';
 
-const clearCookie = { path: '/', maxAge: 0, httpOnly: true, sameSite: 'strict' as const };
+/** Cookies are only cleared when the attributes match the ones they were set with. */
+const clearCookie = { ...sessionCookieOptions(), maxAge: 0 };
 
 export async function POST(request: NextRequest) {
   // The logout button is a native form post, so it answers with a redirect instead of JSON.

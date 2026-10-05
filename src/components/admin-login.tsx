@@ -9,12 +9,12 @@ const messages: Record<string, string> = {
   limited: c.limited,
 };
 
-export function AdminLogin() {
+export function AdminLogin({ notice }: { notice?: string } = {}) {
   const params = useSearchParams();
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const urlError = messages[params.get('error') ?? ''] ?? '';
-  const shown = error || urlError;
+  const shown = error || urlError || notice || '';
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -33,7 +33,7 @@ export function AdminLogin() {
       }
       // A real navigation, not router.refresh(): the session cookie has to be visible to the next
       // document request, and this still works behind proxies that rewrite client-side RSC fetches.
-      window.location.assign('/admin');
+      window.location.assign('/admin?login=ok');
     } catch (err) {
       setError(err instanceof Error ? err.message : c.invalid);
       setPending(false);

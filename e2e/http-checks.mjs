@@ -487,8 +487,11 @@ await check('admin login succeeds and sets a hardened cookie', async () => {
   assert.equal(response.status, 200);
   const raw = response.headers.getSetCookie()[0];
   assert.match(raw, /HttpOnly/i);
-  assert.match(raw, /SameSite=Strict/i);
-  assert.match(raw, /Secure/i, 'an https deployment must set Secure');
+  // The policy is deployment specific: an embedded preview needs SameSite=None, a normal site Strict.
+  const expectedSameSite = (process.env.SESSION_COOKIE_SAMESITE ?? 'strict').toLowerCase();
+  assert.match(raw, new RegExp(`SameSite=${expectedSameSite}`, 'i'), `expected SameSite=${expectedSameSite}`);
+  assert.match(raw, /Secure/i, 'an https deployment (or SameSite=None) must set Secure');
+  if (expectedSameSite === 'none') assert.ok(/SameSite=None/i.test(raw) && /Secure/i.test(raw), 'None requires Secure');
   assert.match(raw, /Path=\//);
   adminCookie = sessionCookie(response);
   assert.equal((await one('SELECT count(*)::int AS total FROM sessions')).total >= 1, true);
@@ -616,6 +619,13 @@ await check('the login route maps a redirect back with a known error code', asyn
   await pool.query('DELETE FROM admin_login_attempts');
 });
 
+await check('the panel explains a login whose cookie the browser refused', async () => {
+  const page = await req('/admin?login=ok');
+  assert.equal(page.status, 200);
+  assert.ok(page.body.includes('کوکی نشست را ذخیره نکرد'), 'the diagnostic copy is rendered');
+  assert.ok(page.body.includes('admin-email'), 'still a login form');
+});
+
 await check('a native form post logs in and lands in the panel (no JavaScript at all)', async () => {
   const response = await fetch(`${baseUrl}/api/admin/login`, {
     method: 'POST',
@@ -624,7 +634,7 @@ await check('a native form post logs in and lands in the panel (no JavaScript at
     body: new URLSearchParams({ email: admin.email, password: admin.password }).toString(),
   });
   assert.equal(response.status, 303, 'a browser form post must be answered with a redirect');
-  assert.equal(response.headers.get('location'), '/admin');
+  assert.equal(response.headers.get('location'), '/admin?login=ok');
   const cookie = sessionCookie(response);
   const panel = await req('/admin', { cookie });
   assert.equal(panel.status, 200);

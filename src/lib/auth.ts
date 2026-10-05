@@ -5,6 +5,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import { db } from '@/db';
 import { sessions, users } from '@/db/schema';
 import { isRole, type Role } from '@/lib/permissions';
+import { isSecureDeployment, sessionCookieOptions, sessionSameSite } from '@/lib/session-cookie';
 import {
   ABSOLUTE_MS,
   evaluateSession,
@@ -16,22 +17,10 @@ import {
 
 export const COOKIE_NAME = 'paramis_session';
 
+// Cookie policy lives in the pure module so it can be unit tested without a server runtime.
+export { isSecureDeployment, sessionCookieOptions, sessionSameSite };
+
 export type SessionUser = { id: number; email: string; role: Role; sessionId: number };
-
-/** Secure cookies only make sense (and only work in Safari) when the site is served over https. */
-export function isSecureDeployment() {
-  return process.env.NODE_ENV === 'production' && (process.env.NEXT_PUBLIC_SITE_URL ?? '').startsWith('https://');
-}
-
-export function sessionCookieOptions() {
-  return {
-    httpOnly: true,
-    secure: isSecureDeployment(),
-    sameSite: 'strict' as const,
-    path: '/',
-    maxAge: Math.floor(ABSOLUTE_MS / 1000),
-  };
-}
 
 export async function createSession(userId: number, context: { ipHash: string; userAgent: string }) {
   const token = generateToken();

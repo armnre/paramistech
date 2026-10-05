@@ -95,7 +95,8 @@ export async function POST(request: NextRequest) {
 
     if (isNativeFormPost(request)) {
       // POST -> 303 -> GET: the browser lands in the panel and a refresh cannot resubmit credentials.
-      return redirectTo('/admin', { name: COOKIE_NAME, value: token, options: sessionCookieOptions() });
+      // `login=ok` lets the panel explain itself if the browser refused to store the session cookie.
+      return redirectTo('/admin?login=ok', { name: COOKIE_NAME, value: token, options: sessionCookieOptions() });
     }
 
     const response = NextResponse.json({ ok: true });
