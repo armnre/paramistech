@@ -23,6 +23,7 @@ After changing `src/db/schema.ts`: `npm run db:generate`, review and commit the 
 | `POSTGRES_PASSWORD` | compose | Password of the bundled Postgres. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | seed | Used only by `seed-admin.mjs` (re-running resets that admin's password and signs it out everywhere). |
 | `RATE_LIMIT_SALT` | production | 16+ chars; salts the hashed IP / email used for rate limits. The app refuses to hash without it in production. |
+| `SESSION_COOKIE_SAMESITE` | no | `strict` (default), `lax` or `none` for the admin session cookie. Use `none` when the panel is embedded in a cross-site frame (an iframe preview): browsers refuse to store Strict/Lax cookies from a cross-site context, so the login silently bounces back to the form. `none` forces `Secure` and needs a browser that allows third-party cookies. |
 | `TRUST_PROXY` | no | `true` only when a trusted proxy overwrites `X-Forwarded-For` (the Caddy stack sets it). With `false`, all visitors share one rate-limit bucket, so use it for local runs only. |
 | `SITE_DOMAIN`, `ACME_EMAIL` | compose | Domain and Let's Encrypt contact for Caddy. |
 | `ALLOW_PLACEHOLDERS` | no | `true` shows sample rows (`is_placeholder`) in production. Leave unset for a real launch. |
@@ -58,6 +59,37 @@ The override publishes port 3000, sets `TRUST_PROXY=false` and keeps Caddy off (
 
 > The compose files and Caddyfile were written and syntax-checked but not run in the authoring sandbox (no Docker there). Run the steps above once on a staging machine before relying on them.
 
+## Deploy on Liara PaaS (NextJS platform)
+
+`liara.json` in the repo root holds the platform settings: `platform: next`, `port: 3000`, Node 22,
+a `curl --fail http://localhost:3000/api/health` health check and a disk named `uploads` mounted on
+the **relative** path `data` (Liara rejects absolute mount paths on the NextJS platform).
+
+```sh
+npm i -g @liara/cli
+liara login
+liara deploy --platform next --port 3000 -d uploads=data
+```
+
+How it fits together:
+
+- `npm start` runs `npm run prestart` first, and `scripts/prestart.mjs` applies pending migrations to
+  `DATABASE_URL`. Migrations are idempotent and a failure stops the boot, so Liara keeps the previous
+  healthy deployment serving instead of routing traffic to a broken one. Without `DATABASE_URL` it is a no-op.
+- `UPLOADS_DIR=data/uploads` matches the mounted disk, so optimized media survives redeploys.
+- Set the app environment variables in the Liara console (they are also visible at build time, which
+  `NEXT_PUBLIC_SITE_URL` needs because it is inlined): `DATABASE_URL`, `NEXT_PUBLIC_SITE_URL`,
+  `RATE_LIMIT_SALT`, `TRUST_PROXY=true`, `UPLOADS_DIR`, `ALLOW_PLACEHOLDERS=false`.
+- Keep `SESSION_COOKIE_SAMESITE` at `strict` on a real domain. `none` is only for panels embedded in a
+  cross-site iframe (the Arena preview).
+- Bootstrap the first admin from your own machine with `ADMIN_EMAIL=… ADMIN_PASSWORD=… node scripts/seed-admin.mjs`
+  against the production `DATABASE_URL`. Never run `seed-content.mjs` or `drizzle-kit push` in production.
+- Because `NEXT_PUBLIC_SITE_URL` is inlined at build time, changing the domain needs a new deploy (not just a restart).
+
+`src/lib/deploy-config.test.ts` guards this contract (platform, port, disk path vs. `uploadsDirectory()`,
+the `prestart` hook, health-check route and documented env vars). The full Persian walkthrough lives in
+[`LIARA-DEPLOY-fa.md`](./LIARA-DEPLOY-fa.md).
+
 ## Roles
 
 | Capability | admin | editor |
@@ -69,7 +101,14 @@ The override publishes port 3000, sets `TRUST_PROXY=false` and keeps Caddy off (
 | Users, activity log | yes | no |
 | Change own password, sign out everywhere | yes | yes |
 
-Every server action, route handler and page re-checks the session and role on the server; hidden links are only cosmetic. Sessions last 8 hours of inactivity (sliding) and at most 7 days; deactivating a user or resetting their password revokes their sessions immediately. Logins are rate limited per IP and per email with a 15 minute lockout.
+Every server action, route handler and page re-checks the session and role on the server; hidden links are only cosmetic.
+When a login completes but the browser did not keep the cookie (third-party cookies blocked, or an iframe
+that refused it), `/admin` explains that instead of showing a bare form again.
+
+The login form and the logout button are plain HTML forms that post to `/api/admin/login` and `/api/admin/logout`
+(303 back to `/admin`, errors come back as `?error=invalid|limited`), so signing in and out also works with
+JavaScript disabled or blocked; the JSON responses those routes return stay in place for the enhanced path, which
+navigates with `window.location.assign` rather than a client-side RSC refresh. Sessions last 8 hours of inactivity (sliding) and at most 7 days; deactivating a user or resetting their password revokes their sessions immediately. Logins are rate limited per IP and per email with a 15 minute lockout.
 
 ## Backups and restore
 
@@ -101,6 +140,38 @@ docker compose up -d app
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+### Browser-free end-to-end suite
+
+`npm run test:http` (`e2e/http-checks.mjs`) covers the same ground as the Playwright scripts over plain HTTP,
+so it also runs on machines that cannot download Chromium. It needs a migrated database, a running
+production build and the same `PLAYWRIGHT_BASE_URL`/env as the other e2e scripts:
+
+```sh
+set -a; . ./.env; set +a
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:http
+```
+
+It checks both locales, canonical/hreflang/JSON-LD/robots/sitemap/feeds, CSP nonces and cache headers,
+the brand assets and dynamic OG cards, the lead API (validation, honeypot, per-IP rate limit), admin
+auth (origin checks, lockout, cookie flags), RBAC and session revocation, CSV export, media uploads
+including the size/type rejections, and every CMS write path submitted **without JavaScript** (multipart
+POST with the rendered form's hidden `$ACTION_ID` field). It writes a few rows and removes them again,
+so point it at a scratch database.
+
+Because a JavaScript-disabled form post is forwarded like a proxied request, the harness sends
+`Origin`, `Host` and `X-Forwarded-Host` for `NEXT_PUBLIC_SITE_URL` — exactly what Caddy or a preview
+proxy does. Submitting those forms by hand against `127.0.0.1` without the forwarded host makes Next
+reject the action ("Invalid Server Actions request"), which is the built-in CSRF guard working as intended.
+
+### Assets and fonts
+
+`public/` (icons, `og.png`, `og-en.png`) and the two Vazirmatn TTFs in `src/assets/fonts` are committed,
+because metadata, the dynamic OG routes, the unit tests and the Docker trace all reference them.
+`node scripts/generate-assets.mjs` regenerates them from `src/app/icon.svg`, but it needs Chromium
+(`npx playwright install chromium`). When that download is unavailable, the OG cards can be composited
+with the same sharp/Pango pipeline the app uses at runtime (`src/lib/og-card.ts`) and the Vazirmatn TTFs,
+which also ship in the `vazirmatn` npm package (`fonts/ttf/Vazirmatn-{ExtraBold,SemiBold}.ttf`).
+
 End-to-end scripts need a running production build. `scripts/start-standalone.sh` runs the standalone output exactly like the container (own directory, migrations first):
 
 ```sh
@@ -121,8 +192,9 @@ node e2e/og-shaping-check.mjs                                       # Persian le
 
 - **CSP**: a per-request nonce is generated in `src/proxy.ts`; scripts need no `'unsafe-inline'`. Styles keep `'unsafe-inline'` because React style props and framer-motion emit inline `style` attributes.
 - **OG images**: rendered with sharp (Pango/HarfBuzz) and the bundled Vazirmatn TTFs (`src/assets/fonts`, SIL OFL). Next's standalone trace drops libvips' shared library, so `next.config.ts` includes it explicitly; without that, sharp falls back to WASM and cannot render text.
-- **Cached content**: `unstable_cache` returns timestamps as strings, so `src/lib/content.ts` revives them to `Date`.
+- **Cached content**: `unstable_cache` returns timestamps as strings, so `src/lib/content.ts` revives them to `Date`. The cache also lands on disk (`.next/cache/fetch-cache`), so it survives a restart: after editing rows with raw SQL, call the admin UI (or clear `.next/cache`) — admin writes invalidate the tags themselves.
 - **No `tsx` at runtime**: seeds and migrations are plain `.mjs` files that only need `pg` and `bcryptjs`, which are kept external so they are present in the standalone image.
+- **Relative paths in a standalone copy**: `scripts/start-standalone.sh` (and the Docker image) run the app from another directory, so a relative `UPLOADS_DIR=./data/uploads` points inside that copy, not next to your `.env`. Set an absolute path (or copy `data/` along) if a second process must see the same uploads.
 - Cover uploads travel through server actions, so `serverActions.bodySizeLimit` is `6mb` (the default 1 MB would reject valid 5 MB images).
 
 See `CONTENT-HANDOVER.md` (what is still a placeholder) and `ADMIN-GUIDE.md` (Persian guide for staff).

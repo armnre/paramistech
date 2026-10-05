@@ -21,6 +21,22 @@ describe('request security', () => {
     expect(resolveClientIp(headers)).toBe('203.0.113.8');
   });
 
+  it('prefers X-Real-IP, which a proxy overwrites and a client cannot extend', () => {
+    const values: Record<string, string> = { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '203.0.113.8, 10.0.0.1' };
+    const headers = { get: (name: string) => values[name] ?? null };
+    process.env.TRUST_PROXY = 'true';
+    expect(resolveClientIp(headers)).toBe('198.51.100.7');
+    // and it is still ignored entirely without a trusted proxy
+    process.env.TRUST_PROXY = 'false';
+    expect(resolveClientIp(headers)).toBe('unknown');
+  });
+
+  it('falls back to the forwarded chain when there is no X-Real-IP', () => {
+    const headers = { get: (name: string) => (name === 'x-forwarded-for' ? '198.51.100.9' : null) };
+    process.env.TRUST_PROXY = 'true';
+    expect(resolveClientIp(headers)).toBe('198.51.100.9');
+  });
+
   it('requires a long rate-limit salt in production', () => {
     vi.stubEnv('NODE_ENV', 'production');
     delete process.env.RATE_LIMIT_SALT;

@@ -10,9 +10,10 @@ import { notificationStatus } from '@/lib/notify-content';
 export const metadata: Metadata = { title: c.dashboard, robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<{ login?: string }> }) {
   const admin = await getStaff();
-  if (!admin) return <AdminLogin />;
+  // Reached /admin?login=ok without a session: the browser dropped the cookie (see sessionSameSite).
+  if (!admin) return <AdminLogin notice={(await searchParams).login === 'ok' ? c.sessionMissing : undefined} />;
   const stats = await leadDashboard();
   const notifications = notificationStatus();
   return (
