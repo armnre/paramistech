@@ -59,6 +59,37 @@ The override publishes port 3000, sets `TRUST_PROXY=false` and keeps Caddy off (
 
 > The compose files and Caddyfile were written and syntax-checked but not run in the authoring sandbox (no Docker there). Run the steps above once on a staging machine before relying on them.
 
+## Deploy on Liara PaaS (NextJS platform)
+
+`liara.json` in the repo root holds the platform settings: `platform: next`, `port: 3000`, Node 22,
+a `curl --fail http://localhost:3000/api/health` health check and a disk named `uploads` mounted on
+the **relative** path `data` (Liara rejects absolute mount paths on the NextJS platform).
+
+```sh
+npm i -g @liara/cli
+liara login
+liara deploy --platform next --port 3000 -d uploads=data
+```
+
+How it fits together:
+
+- `npm start` runs `npm run prestart` first, and `scripts/prestart.mjs` applies pending migrations to
+  `DATABASE_URL`. Migrations are idempotent and a failure stops the boot, so Liara keeps the previous
+  healthy deployment serving instead of routing traffic to a broken one. Without `DATABASE_URL` it is a no-op.
+- `UPLOADS_DIR=data/uploads` matches the mounted disk, so optimized media survives redeploys.
+- Set the app environment variables in the Liara console (they are also visible at build time, which
+  `NEXT_PUBLIC_SITE_URL` needs because it is inlined): `DATABASE_URL`, `NEXT_PUBLIC_SITE_URL`,
+  `RATE_LIMIT_SALT`, `TRUST_PROXY=true`, `UPLOADS_DIR`, `ALLOW_PLACEHOLDERS=false`.
+- Keep `SESSION_COOKIE_SAMESITE` at `strict` on a real domain. `none` is only for panels embedded in a
+  cross-site iframe (the Arena preview).
+- Bootstrap the first admin from your own machine with `ADMIN_EMAIL=… ADMIN_PASSWORD=… node scripts/seed-admin.mjs`
+  against the production `DATABASE_URL`. Never run `seed-content.mjs` or `drizzle-kit push` in production.
+- Because `NEXT_PUBLIC_SITE_URL` is inlined at build time, changing the domain needs a new deploy (not just a restart).
+
+`src/lib/deploy-config.test.ts` guards this contract (platform, port, disk path vs. `uploadsDirectory()`,
+the `prestart` hook, health-check route and documented env vars). The full Persian walkthrough lives in
+[`LIARA-DEPLOY-fa.md`](./LIARA-DEPLOY-fa.md).
+
 ## Roles
 
 | Capability | admin | editor |
