@@ -101,6 +101,38 @@ docker compose up -d app
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+### Browser-free end-to-end suite
+
+`npm run test:http` (`e2e/http-checks.mjs`) covers the same ground as the Playwright scripts over plain HTTP,
+so it also runs on machines that cannot download Chromium. It needs a migrated database, a running
+production build and the same `PLAYWRIGHT_BASE_URL`/env as the other e2e scripts:
+
+```sh
+set -a; . ./.env; set +a
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npm run test:http
+```
+
+It checks both locales, canonical/hreflang/JSON-LD/robots/sitemap/feeds, CSP nonces and cache headers,
+the brand assets and dynamic OG cards, the lead API (validation, honeypot, per-IP rate limit), admin
+auth (origin checks, lockout, cookie flags), RBAC and session revocation, CSV export, media uploads
+including the size/type rejections, and every CMS write path submitted **without JavaScript** (multipart
+POST with the rendered form's hidden `$ACTION_ID` field). It writes a few rows and removes them again,
+so point it at a scratch database.
+
+Because a JavaScript-disabled form post is forwarded like a proxied request, the harness sends
+`Origin`, `Host` and `X-Forwarded-Host` for `NEXT_PUBLIC_SITE_URL` — exactly what Caddy or a preview
+proxy does. Submitting those forms by hand against `127.0.0.1` without the forwarded host makes Next
+reject the action ("Invalid Server Actions request"), which is the built-in CSRF guard working as intended.
+
+### Assets and fonts
+
+`public/` (icons, `og.png`, `og-en.png`) and the two Vazirmatn TTFs in `src/assets/fonts` are committed,
+because metadata, the dynamic OG routes, the unit tests and the Docker trace all reference them.
+`node scripts/generate-assets.mjs` regenerates them from `src/app/icon.svg`, but it needs Chromium
+(`npx playwright install chromium`). When that download is unavailable, the OG cards can be composited
+with the same sharp/Pango pipeline the app uses at runtime (`src/lib/og-card.ts`) and the Vazirmatn TTFs,
+which also ship in the `vazirmatn` npm package (`fonts/ttf/Vazirmatn-{ExtraBold,SemiBold}.ttf`).
+
 End-to-end scripts need a running production build. `scripts/start-standalone.sh` runs the standalone output exactly like the container (own directory, migrations first):
 
 ```sh
@@ -121,8 +153,9 @@ node e2e/og-shaping-check.mjs                                       # Persian le
 
 - **CSP**: a per-request nonce is generated in `src/proxy.ts`; scripts need no `'unsafe-inline'`. Styles keep `'unsafe-inline'` because React style props and framer-motion emit inline `style` attributes.
 - **OG images**: rendered with sharp (Pango/HarfBuzz) and the bundled Vazirmatn TTFs (`src/assets/fonts`, SIL OFL). Next's standalone trace drops libvips' shared library, so `next.config.ts` includes it explicitly; without that, sharp falls back to WASM and cannot render text.
-- **Cached content**: `unstable_cache` returns timestamps as strings, so `src/lib/content.ts` revives them to `Date`.
+- **Cached content**: `unstable_cache` returns timestamps as strings, so `src/lib/content.ts` revives them to `Date`. The cache also lands on disk (`.next/cache/fetch-cache`), so it survives a restart: after editing rows with raw SQL, call the admin UI (or clear `.next/cache`) — admin writes invalidate the tags themselves.
 - **No `tsx` at runtime**: seeds and migrations are plain `.mjs` files that only need `pg` and `bcryptjs`, which are kept external so they are present in the standalone image.
+- **Relative paths in a standalone copy**: `scripts/start-standalone.sh` (and the Docker image) run the app from another directory, so a relative `UPLOADS_DIR=./data/uploads` points inside that copy, not next to your `.env`. Set an absolute path (or copy `data/` along) if a second process must see the same uploads.
 - Cover uploads travel through server actions, so `serverActions.bodySizeLimit` is `6mb` (the default 1 MB would reject valid 5 MB images).
 
 See `CONTENT-HANDOVER.md` (what is still a placeholder) and `ADMIN-GUIDE.md` (Persian guide for staff).

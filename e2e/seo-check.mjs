@@ -8,11 +8,15 @@ const baseUrl = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3100';
 const expectAnalytics = process.env.EXPECT_ANALYTICS === 'true';
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const noindexSlug = `noindex-check-${Date.now()}`;
+// seed-content.mjs does not create posts, so this script publishes its own fixtures: the feed needs at
+// least one indexable post to expose a <pubDate>, and the index needs a post page to check the OG card.
+const publicSlug = `seo-check-post-${Date.now()}`;
 
 await pool.query(
   `INSERT INTO posts (slug, title, excerpt, body_md, published, published_at, noindex, is_placeholder)
-   VALUES ($1, 'noindex check', 'x', 'body text', true, now(), true, false)`,
-  [noindexSlug],
+   VALUES ($1, 'noindex check', 'x', 'body text', true, now(), true, false),
+          ($2, $3, 'fixture for the SEO checks', 'body text', true, now(), false, false)`,
+  [noindexSlug, publicSlug, `SEO check post ${new Date().toISOString()}`],
 );
 
 try {
@@ -94,7 +98,7 @@ try {
   assert.ok(fallback.equals(readFileSync('public/og.png')), 'unknown items must fall back to /og.png');
   console.log('ok  dynamic OG images render (1200x630); unknown items fall back to /og.png');
 } finally {
-  await pool.query('DELETE FROM posts WHERE slug = $1', [noindexSlug]);
+  await pool.query('DELETE FROM posts WHERE slug = ANY($1)', [[noindexSlug, publicSlug]]);
   await pool.end();
 }
 console.log('SEO CHECK PASSED');
