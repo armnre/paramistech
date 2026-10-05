@@ -1,4 +1,7 @@
 // SEO + CSP verification against a running production build (fetch based, no browser).
+// Run it through scripts/e2e.sh, which starts a fresh standalone server: the fixtures below are written
+// straight to the database, and public content is served from an unstable_cache that only an admin
+// write revalidates (the disk copy even survives a restart), so they stay invisible on a warm cache.
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
@@ -19,6 +22,8 @@ await pool.query(
   [noindexSlug, publicSlug, `SEO check post ${new Date().toISOString()}`],
 );
 
+
+
 try {
   const get = async (path) => {
     const response = await fetch(`${baseUrl}${path}`);
@@ -32,7 +37,10 @@ try {
   await get('/rss.xml'); // first request fills the cache, the second one is served from it
   const rssCached = await get('/rss.xml');
   assert.equal(rssCached.response.status, 200, 'RSS must also work on a cache hit (Date columns)');
-  assert.ok(rssCached.text.includes('<pubDate>'), 'RSS items need a pubDate');
+  assert.ok(
+    rssCached.text.includes('<pubDate>'),
+    'RSS items need a pubDate - content is cached (.next/cache/fetch-cache), so rows written straight to the database only show on a server with a cold cache; run this through scripts/e2e.sh',
+  );
   assert.ok(!rssCached.text.includes(noindexSlug), 'noindex posts must not be in the RSS feed');
 
   const paths = [...new Set(['/', '/services', '/projects', '/blog', '/about', '/contact', '/faq', '/privacy', '/terms', ...locations])];

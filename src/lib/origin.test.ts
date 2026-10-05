@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedOrigin, type OriginCheckInput } from './origin';
+import { isAllowedOrigin, isAllowedRequestOrigin, type OriginCheckInput } from './origin';
 
 const base: OriginCheckInput = {
   origin: 'https://paramistech.example',
@@ -41,5 +41,30 @@ describe('admin mutation origin check', () => {
     const input = { ...base, siteUrl: undefined, origin: 'http://localhost:3000', host: 'localhost:3000' };
     expect(isAllowedOrigin({ ...input, nodeEnv: 'development' })).toBe(true);
     expect(isAllowedOrigin({ ...input, nodeEnv: 'production' })).toBe(false);
+  });
+});
+
+describe('no-JavaScript form posts (login/logout)', () => {
+  const headers = (values: Record<string, string>) => ({ get: (name: string) => values[name] ?? null });
+  const env = { NODE_ENV: 'production', NEXT_PUBLIC_SITE_URL: 'https://paramistech.example' } as NodeJS.ProcessEnv;
+
+  it('accepts the configured origin', () => {
+    expect(isAllowedRequestOrigin(headers({ origin: 'https://paramistech.example' }), env)).toBe(true);
+  });
+
+  it('falls back to a same-host Referer when the Origin header is missing', () => {
+    expect(isAllowedRequestOrigin(headers({ referer: 'https://paramistech.example/admin' }), env)).toBe(true);
+  });
+
+  it('rejects a foreign Origin even with a valid Referer', () => {
+    expect(
+      isAllowedRequestOrigin(headers({ origin: 'https://evil.example', referer: 'https://paramistech.example/admin' }), env),
+    ).toBe(false);
+  });
+
+  it('rejects a foreign or unparseable Referer', () => {
+    expect(isAllowedRequestOrigin(headers({ referer: 'https://evil.example/form' }), env)).toBe(false);
+    expect(isAllowedRequestOrigin(headers({ referer: 'not a url' }), env)).toBe(false);
+    expect(isAllowedRequestOrigin(headers({}), env)).toBe(false);
   });
 });

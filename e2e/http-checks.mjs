@@ -590,6 +590,62 @@ await check('markdown preview renders sanitized HTML for staff only', async () =
   assert.ok(!html.includes('<script'), 'scripts stripped');
 });
 
+// ================================================================= no-JavaScript admin login
+await check('the login form is a real form so it works without JavaScript', async () => {
+  const { body } = await req('/admin');
+  const form = parseForms(body).find((entry) => entry.fields.some(([name]) => name === 'email'));
+  assert.ok(form, 'login form rendered');
+  assert.equal(form.attrs.action, '/api/admin/login');
+  assert.equal((form.attrs.method ?? '').toLowerCase(), 'post');
+  assert.ok(form.actionField === null, 'the login form must not depend on a server-action id');
+  assert.ok(form.fields.some(([name]) => name === 'password'), 'password field');
+});
+
+await check('the login route maps a redirect back with a known error code', async () => {
+  await pool.query('DELETE FROM admin_login_attempts');
+  const bad = await req('/api/admin/login', {
+    method: 'POST',
+    body: new URLSearchParams({ email: admin.email, password: 'wrong-password-14' }).toString(),
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin },
+  });
+  assert.equal(bad.status, 303);
+  assert.equal(bad.headers.get('location'), '/admin?error=invalid');
+  const page = await req('/admin?error=invalid', { headers: { referer: `${siteUrl}/admin` } });
+  assert.ok(page.body.includes('اطلاعات ورود نادرست است'), 'the code is rendered as Persian copy');
+  assert.ok(!page.body.includes('wrong-password-14'), 'credentials are never echoed back');
+  await pool.query('DELETE FROM admin_login_attempts');
+});
+
+await check('a native form post logs in and lands in the panel (no JavaScript at all)', async () => {
+  const response = await fetch(`${baseUrl}/api/admin/login`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { ...forwarded, 'content-type': 'application/x-www-form-urlencoded', origin },
+    body: new URLSearchParams({ email: admin.email, password: admin.password }).toString(),
+  });
+  assert.equal(response.status, 303, 'a browser form post must be answered with a redirect');
+  assert.equal(response.headers.get('location'), '/admin');
+  const cookie = sessionCookie(response);
+  const panel = await req('/admin', { cookie });
+  assert.equal(panel.status, 200);
+  assert.ok(panel.body.includes('داشبورد'), 'the dashboard is rendered');
+  assert.ok(!panel.body.includes('admin-email'), 'the login form is gone');
+
+  // the logout button is a native form as well
+  const shell = parseForms(panel.body).find((entry) => entry.attrs.action === '/api/admin/logout');
+  assert.ok(shell, 'logout is a native form post');
+  const out = await fetch(`${baseUrl}/api/admin/logout`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { ...forwarded, 'content-type': 'application/x-www-form-urlencoded', origin, cookie },
+    body: '',
+  });
+  assert.equal(out.status, 303);
+  assert.equal(out.headers.get('location'), '/admin');
+  const after = await req('/admin', { cookie });
+  assert.ok(after.body.includes('admin-email'), 'the session is gone after a native logout');
+});
+
 // ================================================================= CMS writes
 await check('a service can be created, published and appears on the public page immediately', async () => {
   const slug = `e2e-service-${stamp}`;
@@ -751,6 +807,10 @@ await check('settings edits reach the public contact page', async () => {
       contactAddress: before.contact_address,
     },
   });
+  // Every admin save clears is_placeholder (an admin touching a sample row makes it real content), so
+  // the flag has to be restored through SQL as well - otherwise production-mode checks go red later.
+  await pool.query('UPDATE settings SET is_placeholder = $1 WHERE id = 1', [before.is_placeholder]);
+  assert.equal((await one('SELECT is_placeholder FROM settings WHERE id = 1')).is_placeholder, before.is_placeholder);
 });
 
 await check('lead status and notes can be updated and are audited', async () => {

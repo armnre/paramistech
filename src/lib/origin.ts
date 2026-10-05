@@ -41,13 +41,31 @@ export function isAllowedOrigin(input: OriginCheckInput) {
   return allowedHosts(input).has(originHost);
 }
 
-export function requestOriginAllowed(headers: { get(name: string): string | null }) {
-  return isAllowedOrigin({
-    origin: headers.get('origin'),
+function originInput(headers: { get(name: string): string | null }, env: NodeJS.ProcessEnv) {
+  return {
     host: headers.get('host'),
     forwardedHost: headers.get('x-forwarded-host'),
-    siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
-    trustProxy: process.env.TRUST_PROXY === 'true',
-    nodeEnv: process.env.NODE_ENV,
-  });
+    siteUrl: env.NEXT_PUBLIC_SITE_URL,
+    trustProxy: env.TRUST_PROXY === 'true',
+    nodeEnv: env.NODE_ENV,
+  };
+}
+
+export function requestOriginAllowed(headers: { get(name: string): string | null }, env: NodeJS.ProcessEnv = process.env) {
+  return isAllowedOrigin({ ...originInput(headers, env), origin: headers.get('origin') });
+}
+
+/**
+ * Same check, with a Referer fallback for plain HTML form posts (the no-JavaScript login/logout path).
+ * Browsers omit Origin on some navigations and privacy tooling can strip it; Referer is still
+ * host-checked. Both headers are browser-controlled, so a cross-site post cannot forge either.
+ */
+export function isAllowedRequestOrigin(headers: { get(name: string): string | null }, env: NodeJS.ProcessEnv = process.env) {
+  const input = originInput(headers, env);
+  const origin = headers.get('origin');
+  // A present Origin is authoritative: a matching Referer must never rescue a foreign one.
+  if (origin) return isAllowedOrigin({ ...input, origin });
+  const referer = headers.get('referer');
+  if (!referer) return false;
+  return isAllowedOrigin({ ...input, origin: referer });
 }

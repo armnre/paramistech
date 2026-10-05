@@ -69,7 +69,11 @@ The override publishes port 3000, sets `TRUST_PROXY=false` and keeps Caddy off (
 | Users, activity log | yes | no |
 | Change own password, sign out everywhere | yes | yes |
 
-Every server action, route handler and page re-checks the session and role on the server; hidden links are only cosmetic. Sessions last 8 hours of inactivity (sliding) and at most 7 days; deactivating a user or resetting their password revokes their sessions immediately. Logins are rate limited per IP and per email with a 15 minute lockout.
+Every server action, route handler and page re-checks the session and role on the server; hidden links are only cosmetic.
+The login form and the logout button are plain HTML forms that post to `/api/admin/login` and `/api/admin/logout`
+(303 back to `/admin`, errors come back as `?error=invalid|limited`), so signing in and out also works with
+JavaScript disabled or blocked; the JSON responses those routes return stay in place for the enhanced path, which
+navigates with `window.location.assign` rather than a client-side RSC refresh. Sessions last 8 hours of inactivity (sliding) and at most 7 days; deactivating a user or resetting their password revokes their sessions immediately. Logins are rate limited per IP and per email with a 15 minute lockout.
 
 ## Backups and restore
 
