@@ -1,20 +1,9 @@
 {
-  "platform": "next",
   "port": 3000,
   "node": {
     "version": "22"
   },
-  "healthCheck": {
-    "command": "CMD curl --fail http://localhost:3000/api/health || exit 1",
-    "interval": 30,
-    "timeout": 15,
-    "retries": 3,
-    "startPeriod": 15
-  },
-  "disks": [
-    {
-      "name": "uploads",
-      "mountTo": "data"
-    }
-  ]
+  "next": {
+    "mirror": false
+  }
 }
