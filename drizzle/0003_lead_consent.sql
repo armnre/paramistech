@@ -1,1 +1,0 @@
-ALTER TABLE "leads" ADD COLUMN "consent_at" timestamp with time zone;

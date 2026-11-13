@@ -1,0 +1,19 @@
+{
+  "name": "paramistech-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx deploy/server/src/index.ts",
+    "admin": "tsx deploy/server/src/admin.ts",
+    "seed": "tsx deploy/server/src/seed.ts",
+    "billing": "tsx deploy/server/src/billing.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "tsx": "^4.19.2",
+    "zod": "3.24.2",
+    "zitejs": "file:./deploy/server/zitejs-shim"
+  },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "zitejs",
+  "version": "1.0.0-standalone",
+  "type": "module",
+  "exports": { "./backend": "./backend.mjs", "./db": "./db.mjs" }
+}

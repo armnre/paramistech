@@ -1,12 +1,7 @@
 node_modules/
-.next/
+dist/
+deploy/web/dist/
 .env
-.env.*
-!.env.example
 *.log
-*.tsbuildinfo
-next-env.d.ts
+uploads/
 .DS_Store
-data/
-backups/
-artifacts/
